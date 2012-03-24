@@ -118,6 +118,119 @@ module Spree
 
       before_transition :to => 'complete' do |order|
         begin
+          # order.adjust_for_credit_card_surcharge!
+          if order.payments.count == 1 || order.payments.count == 0
+            payment = order.payments[0]
+            puts payment.amount.to_s
+            cc_surcharge_percent = Spree::Config[:credit_card_surcharge] / 100
+            Spree::Adjustment.where("adjustable_id = ? AND label = ?", order.id, "Non-Cash Discount Rate").each do |a|
+              puts a.label
+              a.destroy
+            end
+            binding.pry
+            order.update!
+            puts "Order adjustments: #{order.adjustments.count}"
+            if payment.payment_method.name == "Credit Card"
+              cc_surcharge = order.total * cc_surcharge_percent
+              binding.pry
+              cc_surcharge_adjustment = Spree::Adjustment.new(:adjustable_id => order.id,
+                :amount => cc_surcharge,
+                :originator_type => "CreditCardSurcharge",
+                :label => "Non-Cash Discount Rate",
+                :mandatory => true,
+                :eligible => true
+              )
+              binding.pry
+              cc_surcharge_adjustment.save!
+              order.adjustments << cc_surcharge_adjustment
+              order.save
+              
+              binding.pry
+              cc_surcharge_adjustment.save!
+              puts "added surcharge"
+              order.update!
+              binding.pry
+              payment.amount = order.total
+              payment.save!
+            end
+          end
+    
+          # def handle_credit_card_deposit_orders!
+          payments = Spree::Payment.where('order_id = ?',order.id)
+          puts "num payments = #{payments.count}"
+          if order.payments.count == 1
+            payment = payments[0]
+            #binding.pry if Rails.env.development?
+
+            if payment.payment_method.name == "Bank Wire w CC Deposit"
+              puts "have payment by bank wire"
+              deposit_percents = eval(Spree::Config[:credit_card_deposit_percent]).to_a
+              deposit_percent = deposit_percents[deposit_percents.find_index{|dp| order.total < dp[0].to_d}][1].to_f
+              cc_deposit = payment.amount * deposit_percent
+              wire_payment = payment.amount - cc_deposit
+              if Spree::Payment.where('order_id = ?',order.id).count == 1
+                remaining_payment = Spree::Payment.new( :order_id => order.id,
+                  :amount  => wire_payment, 
+                  :source_id => nil, 
+                  :source_type => "Check", 
+                  :payment_method_id => Spree::PaymentMethod.find_by_name("Bank Wire").id, 
+                  :state => "pending", 
+                  :response_code => nil, 
+                  :avs_response => nil)
+                remaining_payment.save!
+                payment.amount = cc_deposit 
+                payment.save!
+                order.payments = Spree::Payment.where('order_id = ?', order.id)
+                cc_deposit_index = order.payments.index{|p| p.source_type == "Spree::Creditcard"}
+                remaining_payment_index = cc_deposit_index  == 0 ? 1 : 0
+                order.save!
+                # payment.order.save!
+                order.payments[cc_deposit_index].amount = order.payments[cc_deposit_index].amount - order.payments[remaining_payment_index].amount
+                order.payments[cc_deposit_index].save!
+                order.save!
+                puts "have payment by bank wire"
+                puts "original payment amount: #{payment.amount}"
+                puts "deposit percent: #{deposit_percent}"
+                puts "cc deposit: #{cc_deposit}"
+                puts "wire payment: #{wire_payment}"
+                #binding.pry if Rails.env.development?
+              end
+            elsif payment.payment_method.name == "Check w CC Deposit"
+              # binding.pry if Rails.env.development?
+              puts "have payment by check"
+              deposit_percents = eval(Spree::Config[:credit_card_deposit_percent]).to_a
+              deposit_percent = deposit_percents[deposit_percents.find_index{|dp| order.total < dp[0].to_d}][1].to_f
+              cc_deposit = payment.amount * deposit_percent
+              check_payment = payment.amount - cc_deposit
+              puts check_payment
+              #binding.pry if Rails.env.development?
+              remaining_payment = Spree::Payment.new( :order_id => order.id,
+                :amount  => check_payment, 
+                :source_id => nil, 
+                :source_type => "Check", 
+                :payment_method_id => Spree::PaymentMethod.find_by_name("Check").id, 
+                :state => "pending", 
+                :response_code => nil, 
+                :avs_response => nil)
+              remaining_payment.save!
+              payment.amount = cc_deposit
+              payment.save!
+              order.payments = Spree::Payment.where('order_id = ?', order.id)
+              cc_deposit_index = order.payments.index{|p| p.source_type == "Spree::Creditcard"}
+              remaining_payment_index = cc_deposit_index == 0 ? 1 : 0
+              order.save!
+              # payment.order.save!
+              order.payments[cc_deposit_index].amount = order.payments[cc_deposit_index].amount - order.payments[remaining_payment_index].amount
+              order.payments[cc_deposit_index].save!
+              order.save!
+              puts "have payment by check wire"
+              puts "original payment amount: #{payment.amount}"
+              puts "deposit percent: #{deposit_percent}"
+              puts "cc deposit: #{cc_deposit}"
+              puts "check payment: #{wire_payment}"
+              #binding.pry if Rails.env.development?
+            end
+          end
           order.process_payments!
         rescue Core::GatewayError
           if Spree::Config[:allow_checkout_on_gateway_error]
@@ -127,17 +240,6 @@ module Spree
           end
         end
       end
-
-      before_transition :to => ['delivery'] do |order|
-        order.shipments.each { |s| s.destroy unless s.shipping_method.available_to_order?(order) }
-      end
-
-      after_transition :to => 'complete', :do => :finalize!
-      after_transition :to => 'delivery', :do => :create_tax_charge!
-      after_transition :to => 'payment',  :do => :create_shipment!
-      after_transition :to => 'resumed',  :do => :after_resume
-      after_transition :to => 'canceled', :do => :after_cancel
-
     end
 
     # Indicates whether there are any backordered InventoryUnits associated with the Order.
