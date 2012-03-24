@@ -127,12 +127,10 @@ module Spree
               puts a.label
               a.destroy
             end
-            binding.pry
             order.update!
             puts "Order adjustments: #{order.adjustments.count}"
             if payment.payment_method.name == "Credit Card"
               cc_surcharge = order.total * cc_surcharge_percent
-              binding.pry
               cc_surcharge_adjustment = Spree::Adjustment.new(:adjustable_id => order.id,
                 :amount => cc_surcharge,
                 :originator_type => "CreditCardSurcharge",
@@ -140,16 +138,12 @@ module Spree
                 :mandatory => true,
                 :eligible => true
               )
-              binding.pry
               cc_surcharge_adjustment.save!
               order.adjustments << cc_surcharge_adjustment
-              order.save
-              
-              binding.pry
+              order.save            
               cc_surcharge_adjustment.save!
               puts "added surcharge"
               order.update!
-              binding.pry
               payment.amount = order.total
               payment.save!
             end
