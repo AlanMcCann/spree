@@ -226,6 +226,7 @@ module Spree
             end
           end
           order.process_payments!
+          order.finalize!
         rescue Core::GatewayError
           if Spree::Config[:allow_checkout_on_gateway_error]
             true
