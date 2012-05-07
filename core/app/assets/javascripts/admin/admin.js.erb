@@ -125,7 +125,7 @@ $.fn.product_autocomplete = function(){
           response(result);
         });
       },
-      minLength: 4,
+      minLength: 3,
       focus: function(event, ui) {
         $('#add_product_name').val(ui.item.label);
         return false;
